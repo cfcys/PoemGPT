@@ -6,6 +6,8 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 2) huggingface/transformers PyTorch implementation:
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
+# 作者说明  参考了其他的代码
+
 
 import math
 import inspect
@@ -14,10 +16,12 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
+# 关于 import 也是有对应的编码规范的
+# 层归一化：作者这里对pytorch原本的层归一化进行了包装，支持了是否带上bias
+# pytorch的代码只有继承自nn.Moudle 才能支持带有梯度的自动更新
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
-
+    # 这个类的构造器
     def __init__(self, ndim, bias):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(ndim))
@@ -25,23 +29,28 @@ class LayerNorm(nn.Module):
 
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
-
+# 因果的自注意力机制
+# 目前的gpt都是一个自回归模型，而自回归模型都是有mask的 
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+        # 这里是必须要整除，也就是embding层除以head数量可以整除
         # key, query, value projections for all heads, but in a batch
+        # 从input中去映射，得到三个东西，这三个东西叫Q，K,V
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
+        # 设置dropout层
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
+        # flash attention的效率会更高
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
@@ -74,7 +83,8 @@ class CausalSelfAttention(nn.Module):
         # output projection
         y = self.resid_dropout(self.c_proj(y))
         return y
-
+    
+# transformer中最后的那两个线性的全连接层
 class MLP(nn.Module):
 
     def __init__(self, config):
@@ -91,6 +101,7 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
+# 一个transformer的block，一个block是由attention,layernorm以及MLP共同构成的
 class Block(nn.Module):
 
     def __init__(self, config):
@@ -105,6 +116,8 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
+
+# 参数的配置类  ---> 有空去学一下 OmegaConfig
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -115,6 +128,8 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
+
+# GPT 最为核心的class
 class GPT(nn.Module):
 
     def __init__(self, config):
